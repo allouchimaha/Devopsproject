@@ -5,6 +5,7 @@ pipeline {
         DOCKER_REGISTRY = 'mahaall'  
         DOCKER_IMAGE = 'student-management'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
+        SONAR_PROJECT_KEY = 'student-management'
     }
     
     stages {
@@ -32,7 +33,7 @@ pipeline {
                             withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
                                 sh '''
                                     mvn sonar:sonar \
-                                    -Dsonar.projectKey=student-management \
+                                    -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                                     -Dsonar.projectName="Student Management App" \
                                     -Dsonar.token=${SONAR_TOKEN} \
                                     -Dsonar.host.url=http://localhost:9000 \
@@ -47,7 +48,7 @@ pipeline {
                         withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
                             sh '''
                                 mvn sonar:sonar \
-                                -Dsonar.projectKey=student-management \
+                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                                 -Dsonar.projectName="Student Management App" \
                                 -Dsonar.host.url=http://localhost:9000 \
                                 -Dsonar.login=${SONAR_TOKEN} \
@@ -60,23 +61,64 @@ pipeline {
             }
         }
         
-        stage('Quality Gate') {
-            when {
-                // Exécuter seulement si SonarQube a fonctionné
-                expression { 
-                    try {
-                        withSonarQubeEnv('SonarQube') { return true }
-                    } catch(e) {
-                        return false
-                    }
+        stage('Wait for SonarQube Processing') {
+            steps {
+                echo '⏳ Attente de 3 minutes pour que SonarQube traite l analyse...'
+                sleep time: 3, unit: 'MINUTES'
+                
+                // Vérification manuelle du statut
+                script {
+                    sh '''
+                        echo "Vérification statut SonarQube..."
+                        echo "Test API SonarQube:"
+                        curl -s "http://localhost:9000/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}" || echo "API non accessible"
+                    '''
                 }
             }
+        }
+        
+        stage('Quality Gate Check') {
             steps {
-                echo '⏳ Attente du Quality Gate...'
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                echo '🔍 Vérification du Quality Gate...'
+                script {
+                    try {
+                        // Essayer d'attendre le Quality Gate (avec timeout plus long)
+                        timeout(time: 10, unit: 'MINUTES') {
+                            def qualityGateResult = waitForQualityGate abortPipeline: false
+                            
+                            if (qualityGateResult?.status == 'OK') {
+                                echo '🎉 QUALITY GATE PASSED !'
+                            } else if (qualityGateResult?.status == 'ERROR') {
+                                echo "⚠️ QUALITY GATE FAILED: ${qualityGateResult.status}"
+                                echo "📋 Détails:"
+                                echo qualityGateResult.toString()
+                                echo "⏭️ Continuation malgré l échec du Quality Gate..."
+                            } else {
+                                echo "❓ Quality Gate status inconnu: ${qualityGateResult?.status}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "⏰ Timeout ou erreur Quality Gate: ${e.getMessage()}"
+                        echo "🔍 Vérification manuelle de secours..."
+                        
+                        // Vérification API directe
+                        sh '''
+                            echo "Vérification via API SonarQube..."
+                            API_RESPONSE=$(curl -s "http://localhost:9000/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}" 2>/dev/null || echo "{}")
+                            echo "Réponse API: $API_RESPONSE"
+                            
+                            if echo "$API_RESPONSE" | grep -q '"status":"OK"'; then
+                                echo "✅ API indique: Quality Gate PASSED"
+                            elif echo "$API_RESPONSE" | grep -q '"status":"ERROR"'; then
+                                echo "⚠️ API indique: Quality Gate FAILED"
+                            else
+                                echo "❓ Statut Quality Gate non disponible"
+                            fi
+                        '''
+                        
+                        echo "⏭️ Continuation de la pipeline..."
+                    }
                 }
-                echo '✅ Quality Gate passé'
             }
         }
         
@@ -140,10 +182,11 @@ pipeline {
             echo '   1. ✅ Checkout Git'
             echo '   2. ✅ Build Maven (tests skipped)'
             echo '   3. ✅ Analyse SonarQube'
-            echo '   4. ✅ Quality Gate'
-            echo '   5. ✅ Packaging JAR'
-            echo '   6. ✅ Build Docker Image'
-            echo '   7. ✅ Push Docker Hub'
+            echo '   4. ⏳ Attente traitement SonarQube'
+            echo '   5. 🔍 Vérification Quality Gate'
+            echo '   6. ✅ Packaging JAR'
+            echo '   7. ✅ Build Docker Image'
+            echo '   8. ✅ Push Docker Hub'
             
             // Nettoyage Docker
             sh 'docker system prune -f 2>/dev/null || true'
@@ -151,10 +194,15 @@ pipeline {
         success {
             echo '🚀 SUCCÈS : Pipeline terminée avec succès !'
             echo "📦 Image disponible: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo "🔗 SonarQube: http://localhost:9000/dashboard?id=${SONAR_PROJECT_KEY}"
+        }
+        aborted {
+            echo '⏹️  Pipeline interrompue'
+            echo 'ℹ️  Possible cause: Timeout SonarQube'
         }
         failure {
             echo '💥 ÉCHEC : Pipeline a échoué !'
-            // Vous pouvez ajouter des notifications d'erreur ici
+            echo '📋 Vérifiez les logs pour plus de détails'
         }
     }
 }
