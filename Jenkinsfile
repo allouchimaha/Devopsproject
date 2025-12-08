@@ -60,28 +60,27 @@ pipeline {
             }
         }
         
-        // QUALITY GATE OPTIONNEL - DÉCOMMENTEZ SI BESOIN
-        /*
-        stage('Quality Gate (Optional)') {
-            steps {
-                echo '⏳ Vérification Quality Gate (3min max)...'
-                script {
-                    try {
-                        timeout(time: 3, unit: 'MINUTES') {
-                            def qg = waitForQualityGate abortPipeline: false
-                            if (qg?.status == 'OK') {
-                                echo '🎉 QUALITY GATE PASSED !'
-                            } else {
-                                echo "⚠️ Quality Gate: ${qg?.status ?: 'Non disponible'}"
-                            }
-                        }
-                    } catch (Exception e) {
-                        echo "⏰ Timeout Quality Gate - skip"
+     stage('Quality Gate') {
+    steps {
+        echo '🔍 Vérification rapide Quality Gate (2min max)...'
+        script {
+            try {
+                // Timeout court pour ne pas bloquer
+                timeout(time: 2, unit: 'MINUTES') {
+                    def qg = waitForQualityGate abortPipeline: false
+                    if (qg?.status == 'OK') {
+                        echo '✅ Quality Gate PASSED'
+                    } else if (qg?.status == 'ERROR') {
+                        echo "⚠️ Quality Gate FAILED (mais on continue)"
                     }
                 }
+            } catch (Exception e) {
+                echo "⏰ Timeout après 2min - skip Quality Gate"
+                echo "ℹ️ Vous pouvez vérifier manuellement dans SonarQube"
             }
         }
-        */
+    }
+}
         
         stage('Package') {
             steps {
