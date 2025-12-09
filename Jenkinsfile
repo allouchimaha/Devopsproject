@@ -27,20 +27,22 @@ pipeline {
         stage('🔨 Build Application') {
             steps {
                 sh 'mvn clean compile -DskipTests'
-                echo '✅ Application compilée'
+                echo '✅ Application compilée (JDK 17)'
             }
         }
         
         stage('🔍 Code Quality Analysis') {
             steps {
                 echo '📊 Analyse SonarQube...'
-                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+                // Variable différente pour éviter les conflits
+                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_SECRET')]) {
+                    // Version SÉCURISÉE sans interpolation dangereuse
                     sh """
                         mvn sonar:sonar \
                         -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                         -Dsonar.projectName="Student Management App" \
                         -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_TOKEN} \
+                        -Dsonar.login=\${SONAR_SECRET} \
                         -DskipTests
                     """
                 }
@@ -50,36 +52,24 @@ pipeline {
         
         stage('📦 Create Package and Dockerfile') {
             steps {
-                // 1. Créer le JAR
                 sh 'mvn clean package -DskipTests'
                 archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
                 
-                // 2. Créer Dockerfile s'il n'existe pas
                 sh '''
-                    echo "Vérification du Dockerfile..."
-                    if [ ! -f Dockerfile ]; then
-                        echo "Création du Dockerfile..."
-                        cat > Dockerfile << 'EOF'
-FROM openjdk:11-jre-slim
+                    echo "Création du Dockerfile pour JDK 17..."
+                    cat > Dockerfile << 'EOF'
+FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
 COPY target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
 EOF
-                        echo "✅ Dockerfile créé"
-                    else
-                        echo "✅ Dockerfile existe déjà"
-                    fi
                     
-                    # Afficher le Dockerfile pour vérification
-                    echo "Contenu du Dockerfile:"
-                    cat Dockerfile
-                    echo ""
-                    echo "Fichiers présents:"
-                    ls -la
+                    echo "✅ Dockerfile créé"
+                    ls -la Dockerfile
                 '''
                 
-                echo '✅ Package JAR créé et Dockerfile vérifié'
+                echo '✅ Package JAR créé et Dockerfile prêt'
             }
         }
         
@@ -88,16 +78,6 @@ EOF
                 script {
                     echo '🏗️  Construction de l image Docker...'
                     
-                    // Afficher les fichiers avant build
-                    sh '''
-                        echo "Fichiers dans le répertoire:"
-                        ls -la
-                        echo ""
-                        echo "Contenu de Dockerfile:"
-                        cat Dockerfile || echo "Dockerfile non trouvé"
-                    '''
-                    
-                    // Build l'image
                     sh """
                         docker build -t student-management:latest .
                         docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
@@ -118,12 +98,13 @@ EOF
                         usernameVariable: 'DOCKER_USER',
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
-                        sh """
-                            echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                        // Version sécurisée
+                        sh '''
+                            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
+                            docker push ''' + "${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}" + '''
+                            docker push ''' + "${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest" + '''
                             docker logout
-                        """
+                        '''
                     }
                 }
                 echo '✅ Images publiées sur Docker Hub'
@@ -137,6 +118,14 @@ EOF
             echo '========================================='
             echo '🎉 PIPELINE CI/CD TERMINÉE !'
             echo '========================================='
+            echo ' '
+            echo '📊 RÉSUMÉ :'
+            echo '   1. 📥  Checkout GitHub ............. ✅'
+            echo '   2. 🔨  Build Maven ................. ✅'
+            echo '   3. 🔍  Analyse SonarQube ........... ✅'
+            echo '   4. 📦  Packaging JAR ............... ✅'
+            echo '   5. 🐳  Build Docker Image .......... ✅'
+            echo '   6. ⬆️  Push Docker Hub ............. ✅'
             echo ' '
             echo "🔗 SonarQube: ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
             echo "🔗 Docker Hub: https://hub.docker.com/r/${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
