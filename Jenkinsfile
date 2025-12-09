@@ -35,7 +35,7 @@ pipeline {
                         -DskipTests
                     '''
                 }
-                echo '✅ Analyse terminée: http://localhost:9000/dashboard?id=student-management'
+                echo '✅ Analyse terminée'
             }
         }
         
@@ -51,16 +51,12 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        # Nettoyage avant build
-                        sudo docker rmi ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} 2>/dev/null || true
-                        sudo docker rmi student-management:latest 2>/dev/null || true
-                        
-                        # Build image
-                        sudo docker build -t student-management:latest .
-                        sudo docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                        sudo docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                        # SANS SUDO - après configuration des permissions
+                        docker build -t student-management:latest .
+                        docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
                     '''
-                    sh 'sudo docker images | grep student-management'
+                    sh 'docker images | grep student-management'
                 }
                 echo '✅ Image Docker construite'
             }
@@ -75,11 +71,11 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh '''
-                            # Push vers Docker Hub
-                            echo ${DOCKER_PASS} | sudo docker login -u ${DOCKER_USER} --password-stdin
-                            sudo docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                            sudo docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
-                            sudo docker logout
+                            # SANS SUDO
+                            echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
+                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                            docker logout
                         '''
                     }
                 }
@@ -90,17 +86,8 @@ pipeline {
     
     post {
         always {
-            echo ' '
-            echo '========================================='
-            echo '🎉 PIPELINE CI/CD TERMINÉE !'
-            echo '========================================='
-            echo ' '
+            echo '🎉 PIPELINE TERMINÉE !'
             echo "📦 Image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
-            echo '🔗 SonarQube: http://localhost:9000/dashboard?id=student-management'
-            echo '🐳 Docker Hub: https://hub.docker.com/r/mahaall/student-management'
-            echo ' '
-            
-            sh 'sudo docker system prune -f 2>/dev/null || true'
         }
     }
 }
