@@ -10,7 +10,6 @@ pipeline {
     }
     
     stages {
-        // ÉTAPE 1: Récupération du code
         stage('📥 Checkout Code') {
             steps {
                 checkout([
@@ -25,7 +24,6 @@ pipeline {
             }
         }
         
-        // ÉTAPE 2: Compilation
         stage('🔨 Build Application') {
             steps {
                 sh 'mvn clean compile -DskipTests'
@@ -33,7 +31,6 @@ pipeline {
             }
         }
         
-        // ÉTAPE 3: Analyse SonarQube
         stage('🔍 Code Quality Analysis') {
             steps {
                 echo '📊 Analyse SonarQube...'
@@ -51,22 +48,56 @@ pipeline {
             }
         }
         
-        // ÉTAPE 4: Packaging
-        stage('📦 Create Package') {
+        stage('📦 Create Package and Dockerfile') {
             steps {
+                // 1. Créer le JAR
                 sh 'mvn clean package -DskipTests'
                 archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                echo '✅ Package JAR créé'
+                
+                // 2. Créer Dockerfile s'il n'existe pas
+                sh '''
+                    echo "Vérification du Dockerfile..."
+                    if [ ! -f Dockerfile ]; then
+                        echo "Création du Dockerfile..."
+                        cat > Dockerfile << 'EOF'
+FROM openjdk:11-jre-slim
+WORKDIR /app
+COPY target/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+EOF
+                        echo "✅ Dockerfile créé"
+                    else
+                        echo "✅ Dockerfile existe déjà"
+                    fi
+                    
+                    # Afficher le Dockerfile pour vérification
+                    echo "Contenu du Dockerfile:"
+                    cat Dockerfile
+                    echo ""
+                    echo "Fichiers présents:"
+                    ls -la
+                '''
+                
+                echo '✅ Package JAR créé et Dockerfile vérifié'
             }
         }
         
-        // ÉTAPE 5: Build Docker Image (SIMPLIFIÉE)
         stage('🐳 Build Docker Image') {
             steps {
                 script {
                     echo '🏗️  Construction de l image Docker...'
                     
-                    // Simple et direct - Docker fonctionne maintenant
+                    // Afficher les fichiers avant build
+                    sh '''
+                        echo "Fichiers dans le répertoire:"
+                        ls -la
+                        echo ""
+                        echo "Contenu de Dockerfile:"
+                        cat Dockerfile || echo "Dockerfile non trouvé"
+                    '''
+                    
+                    // Build l'image
                     sh """
                         docker build -t student-management:latest .
                         docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
@@ -79,7 +110,6 @@ pipeline {
             }
         }
         
-        // ÉTAPE 6: Push to Docker Hub (SIMPLIFIÉE)
         stage('⬆️ Push to Docker Hub') {
             steps {
                 script {
@@ -89,7 +119,6 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh """
-                            # Authentification et push
                             echo \${DOCKER_PASS} | docker login -u \${DOCKER_USER} --password-stdin
                             docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
                             docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
@@ -106,24 +135,13 @@ pipeline {
         always {
             echo ' '
             echo '========================================='
-            echo '🎉 PIPELINE CI/CD TERMINÉE AVEC SUCCÈS !'
+            echo '🎉 PIPELINE CI/CD TERMINÉE !'
             echo '========================================='
-            echo ' '
-            echo '📊 RÉSUMÉ :'
-            echo '   1. 📥  Checkout GitHub ............. ✅'
-            echo '   2. 🔨  Build Maven ................. ✅'
-            echo '   3. 🔍  Analyse SonarQube ........... ✅'
-            echo '   4. 📦  Packaging JAR ............... ✅'
-            echo '   5. 🐳  Build Docker Image .......... ✅'
-            echo '   6. ⬆️  Push Docker Hub ............. ✅'
             echo ' '
             echo "🔗 SonarQube: ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
             echo "🔗 Docker Hub: https://hub.docker.com/r/${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
             echo "📦 Image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
             echo ' '
-            
-            // Nettoyage
-            sh 'docker system prune -f 2>/dev/null || true'
         }
     }
 }
