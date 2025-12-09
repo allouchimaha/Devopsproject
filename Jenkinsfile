@@ -8,47 +8,37 @@ pipeline {
     }
     
     stages {
-        // ÉTAPE 1: Récupération du code
         stage('📥 Checkout Code') {
             steps {
                 checkout scm
-                echo '✅ Code source récupéré depuis Git'
+                echo '✅ Code récupéré depuis Git'
             }
         }
         
-        // ÉTAPE 2: Compilation Maven
         stage('🔨 Build Maven') {
             steps {
                 sh 'mvn clean compile -DskipTests'
-                echo '✅ Projet compilé avec succès'
+                echo '✅ Projet compilé'
             }
         }
         
-        // ÉTAPE 3: Analyse SonarQube (SANS Quality Gate)
-        stage('🔍 Analyse Code Quality') {
+        stage('🔍 Analyse SonarQube') {
             steps {
-                echo '🔍 Analyse de qualité du code avec SonarQube...'
-                
-                script {
-                    // Utilisation directe du token (méthode la plus simple)
-                    withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
-                        sh '''
-                            mvn sonar:sonar \
-                            -Dsonar.projectKey=student-management \
-                            -Dsonar.projectName="Student Management App" \
-                            -Dsonar.host.url=http://localhost:9000 \
-                            -Dsonar.login=${SONAR_TOKEN} \
-                            -DskipTests
-                        '''
-                    }
+                echo '🔍 Analyse qualité avec SonarQube...'
+                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        mvn sonar:sonar \
+                        -Dsonar.projectKey=student-management \
+                        -Dsonar.projectName="Student Management App" \
+                        -Dsonar.host.url=http://localhost:9000 \
+                        -Dsonar.login=${SONAR_TOKEN} \
+                        -DskipTests
+                    '''
                 }
-                
-                echo '✅ Analyse SonarQube terminée'
-                echo '📊 Consultez les résultats: http://localhost:9000/dashboard?id=student-management'
+                echo '✅ Analyse terminée: http://localhost:9000/dashboard?id=student-management'
             }
         }
         
-        // ÉTAPE 4: Création du package JAR
         stage('📦 Package Application') {
             steps {
                 sh 'mvn clean package -DskipTests'
@@ -57,22 +47,25 @@ pipeline {
             }
         }
         
-        // ÉTAPE 5: Construction de l'image Docker
         stage('🐳 Build Docker Image') {
             steps {
                 script {
                     sh '''
-                        docker build -t student-management:latest .
-                        docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                        docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                        # Nettoyage avant build
+                        sudo docker rmi ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG} 2>/dev/null || true
+                        sudo docker rmi student-management:latest 2>/dev/null || true
+                        
+                        # Build image
+                        sudo docker build -t student-management:latest .
+                        sudo docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                        sudo docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
                     '''
-                    sh 'docker images | grep student-management'
+                    sh 'sudo docker images | grep student-management'
                 }
-                echo '✅ Image Docker construite et taguée'
+                echo '✅ Image Docker construite'
             }
         }
         
-        // ÉTAPE 6: Publication sur Docker Hub
         stage('⬆️ Push to Docker Hub') {
             steps {
                 script {
@@ -82,15 +75,11 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh '''
-                            # Connexion à Docker Hub
-                            echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
-                            
-                            # Publication des images
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                            docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
-                            
-                            # Déconnexion
-                            docker logout
+                            # Push vers Docker Hub
+                            echo ${DOCKER_PASS} | sudo docker login -u ${DOCKER_USER} --password-stdin
+                            sudo docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
+                            sudo docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
+                            sudo docker logout
                         '''
                     }
                 }
@@ -99,40 +88,19 @@ pipeline {
         }
     }
     
-    // ÉTAPE FINALE: Nettoyage et rapport
     post {
         always {
             echo ' '
             echo '========================================='
-            echo '🎉 PIPELINE CI/CD TERMINÉE AVEC SUCCÈS !'
+            echo '🎉 PIPELINE CI/CD TERMINÉE !'
             echo '========================================='
             echo ' '
-            echo '📋 RÉSUMÉ DES ÉTAPES :'
-            echo '   1. 📥  Checkout Git ............. ✅'
-            echo '   2. 🔨  Build Maven .............. ✅'
-            echo '   3. 🔍  Analyse SonarQube ........ ✅'
-            echo '   4. 📦  Packaging JAR ............ ✅'
-            echo '   5. 🐳  Build Docker Image ....... ✅'
-            echo '   6. ⬆️  Push Docker Hub .......... ✅'
-            echo ' '
-            echo '🔗 LIENS UTILES :'
-            echo '   • SonarQube: http://localhost:9000/dashboard?id=student-management'
-            echo "   • Docker Hub: https://hub.docker.com/r/mahaall/student-management"
-            echo "   • Image Docker: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo "📦 Image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo '🔗 SonarQube: http://localhost:9000/dashboard?id=student-management'
+            echo '🐳 Docker Hub: https://hub.docker.com/r/mahaall/student-management'
             echo ' '
             
-            // Nettoyage Docker
-            sh 'docker system prune -f 2>/dev/null || true'
-        }
-        
-        success {
-            echo '🚀 FÉLICITATIONS ! La pipeline s est exécutée avec succès.'
-            echo '✅ Toutes les étapes sont terminées.'
-        }
-        
-        failure {
-            echo '💥 ERREUR ! La pipeline a échoué.'
-            echo '🔍 Consultez les logs pour plus de détails.'
+            sh 'sudo docker system prune -f 2>/dev/null || true'
         }
     }
 }
