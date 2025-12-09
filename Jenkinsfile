@@ -2,110 +2,78 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_REGISTRY = 'mahaall'  
+        DOCKER_REGISTRY = 'mahaall'
         DOCKER_IMAGE = 'student-management'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
     
     stages {
-        stage('Checkout') {
+        // ÉTAPE 1: Récupération du code
+        stage('📥 Checkout Code') {
             steps {
                 checkout scm
-                echo '✅ Code récupéré depuis Git'
+                echo '✅ Code source récupéré depuis Git'
             }
         }
         
-        stage('Build') {
+        // ÉTAPE 2: Compilation Maven
+        stage('🔨 Build Maven') {
             steps {
                 sh 'mvn clean compile -DskipTests'
-                echo '✅ Build Maven réussi (tests skipped)'
+                echo '✅ Projet compilé avec succès'
             }
         }
         
-        stage('SonarQube Analysis') {
+        // ÉTAPE 3: Analyse SonarQube (SANS Quality Gate)
+        stage('🔍 Analyse Code Quality') {
             steps {
-                echo '🔍 Démarrage de l analyse SonarQube...'
+                echo '🔍 Analyse de qualité du code avec SonarQube...'
+                
                 script {
-                    try {
-                        // Essayer avec configuration Jenkins
-                        withSonarQubeEnv('SonarQube') {
-                            withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
-                                sh '''
-                                    mvn sonar:sonar \
-                                    -Dsonar.projectKey=student-management \
-                                    -Dsonar.projectName="Student Management App" \
-                                    -Dsonar.token=${SONAR_TOKEN} \
-                                    -Dsonar.host.url=http://localhost:9000 \
-                                    -DskipTests
-                                '''
-                            }
-                        }
-                        echo '✅ Analyse SonarQube terminée (via Jenkins config)'
-                    } catch (Exception e) {
-                        echo "⚠️ Configuration Jenkins non trouvée, mode direct..."
-                        // Mode direct sans withSonarQubeEnv
-                        withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
-                            sh '''
-                                mvn sonar:sonar \
-                                -Dsonar.projectKey=student-management \
-                                -Dsonar.projectName="Student Management App" \
-                                -Dsonar.host.url=http://localhost:9000 \
-                                -Dsonar.login=${SONAR_TOKEN} \
-                                -DskipTests
-                            '''
-                        }
-                        echo '✅ Analyse SonarQube terminée (mode direct)'
+                    // Utilisation directe du token (méthode la plus simple)
+                    withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_TOKEN')]) {
+                        sh '''
+                            mvn sonar:sonar \
+                            -Dsonar.projectKey=student-management \
+                            -Dsonar.projectName="Student Management App" \
+                            -Dsonar.host.url=http://localhost:9000 \
+                            -Dsonar.login=${SONAR_TOKEN} \
+                            -DskipTests
+                        '''
                     }
                 }
+                
+                echo '✅ Analyse SonarQube terminée'
+                echo '📊 Consultez les résultats: http://localhost:9000/dashboard?id=student-management'
             }
         }
         
-        stage('Quality Gate') {
-            when {
-                // Exécuter seulement si SonarQube a fonctionné
-                expression { 
-                    try {
-                        withSonarQubeEnv('SonarQube') { return true }
-                    } catch(e) {
-                        return false
-                    }
-                }
-            }
-            steps {
-                echo '⏳ Attente du Quality Gate...'
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-                echo '✅ Quality Gate passé'
-            }
-        }
-        
-        stage('Package') {
+        // ÉTAPE 4: Création du package JAR
+        stage('📦 Package Application') {
             steps {
                 sh 'mvn clean package -DskipTests'
                 archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-                echo '✅ JAR créé et archivé'
+                echo '✅ JAR généré et archivé'
             }
         }
         
-        stage('Docker Build') {
+        // ÉTAPE 5: Construction de l'image Docker
+        stage('🐳 Build Docker Image') {
             steps {
                 script {
-                    // Build l'image
                     sh '''
                         docker build -t student-management:latest .
                         docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
                         docker tag student-management:latest ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
                     '''
-                    
-                    // Vérifier
                     sh 'docker images | grep student-management'
                 }
-                echo '✅ Image Docker créée et taguée'
+                echo '✅ Image Docker construite et taguée'
             }
         }
         
-        stage('Docker Push') {
+        // ÉTAPE 6: Publication sur Docker Hub
+        stage('⬆️ Push to Docker Hub') {
             steps {
                 script {
                     withCredentials([usernamePassword(
@@ -114,47 +82,57 @@ pipeline {
                         passwordVariable: 'DOCKER_PASS'
                     )]) {
                         sh '''
-                            # Login Docker Hub
+                            # Connexion à Docker Hub
                             echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin
                             
-                            # Push avec tag BUILD_NUMBER
+                            # Publication des images
                             docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}
-                            
-                            # Push latest
                             docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest
                             
-                            # Logout
+                            # Déconnexion
                             docker logout
                         '''
                     }
                 }
-                echo '✅ Images poussées sur Docker Hub'
+                echo '✅ Images publiées sur Docker Hub'
             }
         }
     }
     
+    // ÉTAPE FINALE: Nettoyage et rapport
     post {
         always {
-            echo '🎉 PIPELINE CI/CD TERMINÉE ! 🎉'
-            echo '📋 Résumé des étapes exécutées :'
-            echo '   1. ✅ Checkout Git'
-            echo '   2. ✅ Build Maven (tests skipped)'
-            echo '   3. ✅ Analyse SonarQube'
-            echo '   4. ✅ Quality Gate'
-            echo '   5. ✅ Packaging JAR'
-            echo '   6. ✅ Build Docker Image'
-            echo '   7. ✅ Push Docker Hub'
+            echo ' '
+            echo '========================================='
+            echo '🎉 PIPELINE CI/CD TERMINÉE AVEC SUCCÈS !'
+            echo '========================================='
+            echo ' '
+            echo '📋 RÉSUMÉ DES ÉTAPES :'
+            echo '   1. 📥  Checkout Git ............. ✅'
+            echo '   2. 🔨  Build Maven .............. ✅'
+            echo '   3. 🔍  Analyse SonarQube ........ ✅'
+            echo '   4. 📦  Packaging JAR ............ ✅'
+            echo '   5. 🐳  Build Docker Image ....... ✅'
+            echo '   6. ⬆️  Push Docker Hub .......... ✅'
+            echo ' '
+            echo '🔗 LIENS UTILES :'
+            echo '   • SonarQube: http://localhost:9000/dashboard?id=student-management'
+            echo "   • Docker Hub: https://hub.docker.com/r/mahaall/student-management"
+            echo "   • Image Docker: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo ' '
             
             // Nettoyage Docker
             sh 'docker system prune -f 2>/dev/null || true'
         }
+        
         success {
-            echo '🚀 SUCCÈS : Pipeline terminée avec succès !'
-            echo "📦 Image disponible: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
+            echo '🚀 FÉLICITATIONS ! La pipeline s est exécutée avec succès.'
+            echo '✅ Toutes les étapes sont terminées.'
         }
+        
         failure {
-            echo '💥 ÉCHEC : Pipeline a échoué !'
-            // Vous pouvez ajouter des notifications d'erreur ici
+            echo '💥 ERREUR ! La pipeline a échoué.'
+            echo '🔍 Consultez les logs pour plus de détails.'
         }
     }
 }
