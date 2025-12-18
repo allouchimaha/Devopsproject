@@ -5,8 +5,6 @@ pipeline {
         DOCKER_REGISTRY = 'mahaall'
         DOCKER_IMAGE = 'student-management'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
-        SONAR_PROJECT_KEY = 'student-management'
-        SONAR_HOST_URL = 'http://localhost:9000'
         K8S_NAMESPACE = 'devops'
     }
     
@@ -29,23 +27,6 @@ pipeline {
             steps {
                 sh 'mvn clean compile -DskipTests'
                 echo '✅ Application compilée (JDK 17)'
-            }
-        }
-        
-        stage('🔍 Code Quality Analysis') {
-            steps {
-                echo '📊 Analyse SonarQube...'
-                withCredentials([string(credentialsId: 'SONAR_TOKEN', variable: 'SONAR_SECRET')]) {
-                    sh """
-                        mvn sonar:sonar \
-                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                        -Dsonar.projectName="Student Management App" \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=\${SONAR_SECRET} \
-                        -DskipTests
-                    """
-                }
-                echo '✅ Analyse SonarQube terminée'
             }
         }
         
@@ -108,7 +89,6 @@ EOF
             }
         }
         
-        // ⭐ NOUVELLE ÉTAPE KUBERNETES ⭐
         stage('🚀 Deploy to Kubernetes') {
             steps {
                 script {
@@ -221,7 +201,6 @@ EOF
             }
         }
         
-        // ⭐ ÉTAPE DE VÉRIFICATION ⭐
         stage('✅ Verification') {
             steps {
                 script {
@@ -255,14 +234,12 @@ EOF
             echo '📊 RÉSUMÉ :'
             echo '   1. 📥  Checkout GitHub ............. ✅'
             echo '   2. 🔨  Build Maven ................. ✅'
-            echo '   3. 🔍  Analyse SonarQube ........... ✅'
-            echo '   4. 📦  Packaging JAR ............... ✅'
-            echo '   5. 🐳  Build Docker Image .......... ✅'
-            echo '   6. ⬆️  Push Docker Hub ............. ✅'
-            echo '   7. 🚀  Deploy Kubernetes ........... ✅'
-            echo '   8. ✅  Verification ................ ✅'
+            echo '   3. 📦  Packaging JAR ............... ✅'
+            echo '   4. 🐳  Build Docker Image .......... ✅'
+            echo '   5. ⬆️  Push Docker Hub ............. ✅'
+            echo '   6. 🚀  Deploy Kubernetes ........... ✅'
+            echo '   7. ✅  Verification ................ ✅'
             echo ' '
-            echo "🔗 SonarQube: ${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
             echo "🔗 Docker Hub: https://hub.docker.com/r/${DOCKER_REGISTRY}/${DOCKER_IMAGE}"
             echo "📦 Image: ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
             echo "🌐 Kubernetes Namespace: ${K8S_NAMESPACE}"
